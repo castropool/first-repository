@@ -1,0 +1,24 @@
+# systemd *user* unit for TwNewsMonitor (WSL2 Ubuntu or any Linux).
+# Install:  cp deploy/systemd/twnews.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload && systemctl --user enable --now twnews
+# Assumes the project lives in ~/twnews with a virtualenv in ~/twnews/.venv — edit paths if not.
+[Unit]
+Description=TwNewsMonitor - Taiwan news briefings
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/twnews
+ExecStart=%h/twnews/.venv/bin/python %h/twnews/main.py --config %h/twnews/config.yaml
+# Optional: keep push credentials out of config.yaml and reference them as ${VAR} there.
+EnvironmentFile=-%h/.config/twnews.env
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=15
+# Graceful shutdown: SIGTERM, then up to 30 s for in-flight jobs.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

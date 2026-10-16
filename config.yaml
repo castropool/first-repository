@@ -1,0 +1,202 @@
+# TwNewsMonitor configuration
+# Any string value may reference environment variables: "${BARK_DEVICE_KEY}" or "${VAR:-default}".
+# Relative paths are resolved against the directory containing this file.
+# All news timestamps are stored and rendered in Asia/Taipei time.
+
+paths:
+  database: data/news.sqlite3
+  briefings: briefings
+  logs: logs
+
+logging:
+  level: INFO                    # DEBUG for per-source details
+  max_bytes: 10485760            # rotate logs/twnews.log at 10 MB
+  backup_count: 5
+  console: true                  # also log to stderr (journald / NSSM capture this)
+
+fetch:
+  poll_interval_seconds: 30      # scheduler tick; each source is also limited by its own min_interval
+  user_agent: "TwNewsMonitor/1.0 (personal news briefing bot; contact: you@example.com)"
+  robots_user_agent: TwNewsMonitor   # token matched against robots.txt rules
+  respect_robots: true
+  timeout_seconds: 15
+  max_concurrency: 6
+  host_min_gap_seconds: 1.0      # minimum spacing between requests to the same host
+  retries: 3                     # per request, exponential backoff with jitter
+  backoff_base_seconds: 1.0
+  backoff_max_seconds: 30
+  source_backoff_max_seconds: 900    # a failing source is skipped for up to 15 min
+  default_min_interval_seconds: 30   # RSS sources
+  default_html_min_interval_seconds: 120   # HTML-scraped sources: be gentler
+  enrich_max_per_cycle: 5        # article pages fetched per HTML source per cycle (for summaries)
+
+# ---------------------------------------------------------------------------
+# Sources. Each source tries its `feeds` (RSS/Atom, conditional GET) first; if every feed
+# fails it falls back to scraping `html.url`, keeping links that match `html.link_pattern`.
+# Feed URLs change from time to time: run `python main.py --once` to see which work.
+# ---------------------------------------------------------------------------
+sources:
+  - id: cna
+    name: 中央社
+    feeds:
+      - https://feeds.feedburner.com/rsscna/politics
+      - https://feeds.feedburner.com/rsscna/mainland
+      - https://feeds.feedburner.com/rsscna/finance
+      - https://feeds.feedburner.com/rsscna/technology
+      - https://feeds.feedburner.com/rsscna/social
+    html:
+      url: https://www.cna.com.tw/list/aall.aspx
+      link_pattern: '^https://www\.cna\.com\.tw/news/[a-z]+/\d+\.aspx'
+
+  - id: udn
+    name: 联合新闻网
+    feeds:
+      - https://udn.com/rssfeed/news/2/6638?ch=news      # 要聞
+    html:
+      url: https://udn.com/news/breaknews/1
+      link_pattern: '^https://udn\.com/news/story/\d+/\d+'
+
+  - id: ltn
+    name: 自由时报
+    feeds:
+      - https://news.ltn.com.tw/rss/all.xml
+    html:
+      url: https://news.ltn.com.tw/list/breakingnews
+      link_pattern: '^https://news\.ltn\.com\.tw/news/[a-z]+/breakingnews/\d+'
+
+  - id: ettoday
+    name: ETtoday
+    feeds:
+      - https://feeds.feedburner.com/ettoday/realtime
+    html:
+      url: https://www.ettoday.net/news/news-list.htm
+      link_pattern: '^https://www\.ettoday\.net/news/\d{8}/\d+\.htm'
+
+  - id: chinatimes
+    name: 中时新闻网
+    feeds:
+      - https://www.chinatimes.com/rss/realtimenews.xml
+    html:
+      url: https://www.chinatimes.com/realtimenews/
+      link_pattern: '^https://www\.chinatimes\.com/realtimenews/\d{14}-\d+'
+
+  - id: tvbs
+    name: TVBS新闻
+    # No official RSS feed known: HTML listing page + trafilatura for summaries.
+    html:
+      url: https://news.tvbs.com.tw/realtime
+      link_pattern: '^https://news\.tvbs\.com\.tw/[a-z]+/\d{6,}$'
+    min_interval: 120
+    enrich: true
+
+  - id: focustaiwan
+    name: Focus Taiwan
+    feeds:
+      - https://feeds.feedburner.com/rsscna/engnews
+    html:
+      url: https://focustaiwan.tw/latest
+      link_pattern: '^https://focustaiwan\.tw/[a-z-]+/\d{12}$'
+
+  - id: taipeitimes
+    name: Taipei Times
+    feeds:
+      - https://www.taipeitimes.com/xml/index.rss
+    html:
+      url: https://www.taipeitimes.com/News/list?section=all
+      link_pattern: '^https://www\.taipeitimes\.com/News/[a-z]+/archives/\d{4}/\d{2}/\d{2}/\d+'
+    min_interval: 120
+
+  - id: gnews
+    name: Google新闻·台湾
+    feeds:
+      - https://news.google.com/rss?hl=zh-TW&gl=TW&ceid=TW:zh-Hant
+      - https://news.google.com/rss/headlines/section/topic/NATION?hl=zh-TW&gl=TW&ceid=TW:zh-Hant
+      - https://news.google.com/rss/search?q=%E5%8F%B0%E6%B5%B7%20OR%20%E5%85%A9%E5%B2%B8&hl=zh-TW&gl=TW&ceid=TW:zh-Hant   # 台海 OR 兩岸
+      - https://news.google.com/rss/search?q=%E5%8F%B0%E7%A9%8D%E9%9B%BB%20OR%20TSMC&hl=zh-TW&gl=TW&ceid=TW:zh-Hant         # 台積電 OR TSMC
+    min_interval: 120            # Google rate-limits aggressive pollers
+
+# ---------------------------------------------------------------------------
+# Watch keywords: a NEW item whose headline or summary contains any of these triggers a flash
+# briefing. Matching is case-insensitive and script-insensitive (军演 also matches 軍演).
+# ---------------------------------------------------------------------------
+watch_keywords:
+  - 台海
+  - 军演
+  - 选举
+  - 半导体
+  - TSMC
+  - 台积电
+  - 两岸
+
+# Topic buckets used when briefing.group_by = topic (first match wins; otherwise 其他).
+topics:
+  两岸与国防: [两岸, 台海, 军演, 解放军, 共军, 国防, 国军, 中共, 陆委会, 国台办, PLA, China, cross-strait, military]
+  政治与选举: [选举, 立法院, 总统, 行政院, 国民党, 民进党, 民众党, 罢免, 公投, 赖清德, election, legislature, KMT, DPP]
+  财经与科技: [半导体, 台积电, TSMC, 股市, 台股, 经济, 出口, 关税, AI, 晶片, 芯片, semiconductor, economy, stocks, tariff]
+  国际: [美国, 日本, 欧盟, 外交, 川普, 特朗普, US, Japan, diplomacy]
+  社会与生活: [地震, 台风, 天气, 交通, 疫情, 警方, earthquake, typhoon]
+
+briefing:
+  interval_minutes: 60           # regular briefing cadence
+  align_to_clock: true           # 60 -> on the hour; 30 -> :00/:30; otherwise every N min from start
+  group_by: source               # source | topic
+  skip_if_empty: true            # don't produce an empty regular briefing
+  max_items: 300
+  late_grace_minutes: 15         # include items published shortly before the window (late feed updates)
+  keep_latest: 48                # keep newest N files per kind (regular / flash / sample)
+  title: 台湾新闻简报
+  font: Microsoft YaHei          # East-Asian font set in the .docx
+
+flash:
+  enabled: true
+  cooldown_seconds: 120          # first match goes out immediately; matches within the cooldown are batched
+  max_age_minutes: 180           # don't flash old stories that only just appeared in a feed
+  skip_initial_backlog: true     # the very first fetch of a source never triggers a flash
+
+storage:
+  retain_days: 30                # delete items older than this from SQLite
+
+# Links let text-only channels (Bark, ServerChan, PushPlus) open the .docx.
+# Option A: enable the built-in file server and expose it to your phone (e.g. via Tailscale):
+#   public_base_url: http://100.101.102.103:8765   -> links look like <base>/<token>/<file>.docx
+# Option B: point public_base_url at a folder you sync/serve elsewhere (file server disabled):
+#   links look like <base>/<file>.docx
+links:
+  public_base_url: ""
+  file_server:
+    enabled: false
+    bind: 0.0.0.0
+    port: 8765
+    token: "CHANGE-ME-to-a-long-random-string"   # >= 16 chars; python -c "import secrets;print(secrets.token_urlsafe(24))"
+
+push:
+  headline_count: 8              # headlines listed in the push text
+  channels:
+    - type: bark                 # iOS — https://bark.day.app
+      enabled: true
+      server: https://api.day.app
+      device_key: "YOUR_BARK_DEVICE_KEY"
+      group: 台湾新闻
+      # sound: minuet
+
+    - type: serverchan           # WeChat — https://sct.ftqq.com (SCT... or sctp... keys)
+      enabled: false
+      sendkey: "YOUR_SERVERCHAN_SENDKEY"
+
+    - type: pushplus             # WeChat — https://www.pushplus.plus
+      enabled: false
+      token: "YOUR_PUSHPLUS_TOKEN"
+      # topic: your_group_code
+
+    - type: telegram             # delivers the .docx file itself (<= 50 MB)
+      enabled: false
+      bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+      chat_id: "YOUR_CHAT_ID"
+
+    - type: webhook              # generic: multipart (payload JSON + file) if <= max_file_bytes, else JSON + file_url
+      enabled: false
+      url: "https://example.com/your-webhook"
+      max_file_bytes: 10485760
+      send_file: true
+      headers:
+        Authorization: "Bearer YOUR_WEBHOOK_TOKEN"
