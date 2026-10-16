@@ -1632,9 +1632,10 @@ def main():
             f.write(f"file '{segs[i]}'\n")
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst,
                     "-i", mix, "-i", SRT, "-map", "0:v", "-map", "1:a", "-map", "2:s",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-c:s", "mov_text",
+                    "-c:v", "libx264", "-preset", "slow", "-crf", "25", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "192k", "-c:s", "mov_text",
                     "-metadata:s:s:0", "language=eng", "-metadata", "title=America: A Short History",
-                    "-movflags", "+faststart", "-shortest", OUT], check=True)
+                    "-movflags", "+faststart", "-t", f"{total:.3f}", OUT], check=True)
     print("wrote", OUT)
 
 
